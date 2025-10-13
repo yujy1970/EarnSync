@@ -8,22 +8,22 @@ export const useMarketStore = defineStore('market', () => {
   const chartData = ref({})
   const loading = ref(false)
   const uploadProgress = ref(0)
-
+  
   // Getter
   const marketTitle = computed(() => {
     const titles = {
       cn: '中国A股市场',
-      us: '美国股票市场',
-      hk: '香港股票市场',
+      us: '美国股票市场', 
+      hk: '香港股票市场'
     }
     return titles[currentMarket.value] || '股票市场'
   })
-
+  
   // Actions
   const setCurrentMarket = (market: string) => {
     currentMarket.value = market
   }
-
+  
   const fetchChartData = async (market: string) => {
     loading.value = true
     try {
@@ -37,16 +37,16 @@ export const useMarketStore = defineStore('market', () => {
       loading.value = false
     }
   }
-
+  
   const uploadFile = async (market: string, fileType: string, file: File) => {
     const formData = new FormData()
     formData.append('file', file)
-
+    
     uploadProgress.value = 0
-
+    
     try {
       const result = await marketAPI.uploadFile(market, fileType, formData)
-
+      
       // 上传成功后刷新数据
       await fetchChartData(market)
       return result
@@ -57,20 +57,20 @@ export const useMarketStore = defineStore('market', () => {
       uploadProgress.value = 0
     }
   }
-
+  
   return {
     // State
     currentMarket,
     chartData,
     loading,
     uploadProgress,
-
+    
     // Getters
     marketTitle,
-
+    
     // Actions
     setCurrentMarket,
     fetchChartData,
-    uploadFile,
+    uploadFile
   }
 })
