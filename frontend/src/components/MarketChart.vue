@@ -1,272 +1,139 @@
 <template>
-  <div class="market-chart">
-    <div v-if="loading" class="chart-loading">图表加载中...</div>
-    <div v-else-if="!hasData" class="chart-empty">📊 暂无数据，请上传数据文件或检查连接</div>
-    <div v-else ref="chartRef" class="chart-container"></div>
-  </div>
+  <div ref="chartRef" class="chart-container"></div>
 </template>
 
-<script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
+<script setup>
+import { ref, onMounted, watch } from 'vue'
 import * as echarts from 'echarts'
+import { useMarketStore } from '@/stores/marketStore'
 
-const props = defineProps({
-  data: {
-    type: Object,
-    required: true,
-  },
-  loading: {
-    type: Boolean,
-    default: false,
-  },
-})
+const chartRef = ref(null)
+const chart = ref(null)
+const marketStore = useMarketStore()
 
-const chartRef = ref<HTMLElement>()
-let chartInstance: echarts.ECharts | null = null
-const chartInitialized = ref(false)
-
-// 计算属性：检查是否有数据可显示
-const hasData = computed(() => {
-  if (!props.data) return false
-
-  const { indices, moneyGrow } = props.data
-  const hasIndicesData =
-    indices && indices.some((index: any) => index.data && index.data.length > 0)
-  const hasMoneyGrowData = moneyGrow && moneyGrow.length > 0
-
-  return hasIndicesData || hasMoneyGrowData
-})
-
-// 初始化图表
-const initChart = () => {
-  if (!chartRef.value || chartInstance) return
-
-  chartInstance = echarts.init(chartRef.value)
-  chartInitialized.value = true
-  console.log('图表初始化完成')
-
-  // 立即尝试渲染（如果有数据的话）
-  if (hasData.value) {
-    updateChart()
-  }
+// === 统一日期格式函数 ===
+function normalizeDates(arr) {
+  if (!Array.isArray(arr)) return []
+  return arr
+    .map(([d, v]) => {
+      let ts
+      if (typeof d === 'number') {
+        // 秒级时间戳 → 毫秒
+        ts = d < 1e11 ? d * 1000 : d
+      } else if (typeof d === 'string') {
+        ts = Date.parse(d)
+      } else {
+        ts = +d
+      }
+      return [ts, v]
+    })
+    .filter(([ts, v]) => !isNaN(ts) && v != null)
 }
 
-// 更新图表数据
-const updateChart = () => {
-  if (!chartInstance || !props.data || !hasData.value) {
-    console.log('图表更新条件不满足:', {
-      hasInstance: !!chartInstance,
-      hasData: !!props.data,
-      hasValidData: hasData.value,
-    })
+// === 主绘图函数 ===
+function renderChart(indexData, equityData) {
+  if (!chart.value) chart.value = echarts.init(chartRef.value)
+
+  indexData = normalizeDates(indexData)
+  equityData = normalizeDates(equityData)
+
+  if (!indexData.length || !equityData.length) {
+    console.warn('No data available for chart.')
     return
   }
 
-  console.log('开始更新图表数据...')
-  const { indices, moneyGrow } = props.data
-  const series: any[] = []
-  const legends: string[] = []
-
-  // 处理股票指数数据（K线图）
-  if (indices && indices.length > 0) {
-    indices.forEach((index: any) => {
-      if (index.data && index.data.length > 0) {
-        const klineData = index.data.map((item: any) => [
-          item[1], // open
-          item[2], // close
-          item[3], // low
-          item[4], // high
-        ])
-
-        series.push({
-          name: index.name,
-          type: 'candlestick',
-          data: klineData,
-          itemStyle: {
-            color: '#ec0000',
-            color0: '#00da3c',
-            borderColor: '#8A0000',
-            borderColor0: '#008F28',
-          },
-        })
-        legends.push(index.name)
-      }
-    })
-  }
-
-  // 处理资金增长曲线
-  if (moneyGrow && moneyGrow.length > 0) {
-    const moneyData = moneyGrow.map((item: any) => item[1])
-
-    series.push({
-      name: '资金增长曲线',
-      type: 'line',
-      yAxisIndex: 1,
-      data: moneyData,
-      lineStyle: {
-        color: '#ff9800',
-        width: 3,
-      },
-      itemStyle: {
-        color: '#ff9800',
-      },
-    })
-    legends.push('资金增长曲线')
-  }
-
-  // 获取日期数据
-  const dates =
-    indices && indices.length > 0 && indices[0].data
-      ? indices[0].data.map((item: any) => item[0])
-      : moneyGrow
-        ? moneyGrow.map((item: any) => item[0])
-        : []
+  // 统一时间范围
+  const minDate = Math.min(indexData[0][0], equityData[0][0])
+  const maxDate = Math.max(indexData[indexData.length - 1][0], equityData[equityData.length - 1][0])
 
   const option = {
-    title: {
-      text: '股票指数与资金曲线',
-      left: 'center',
-    },
     tooltip: {
       trigger: 'axis',
-      axisPointer: {
-        type: 'cross',
+      axisPointer: { type: 'cross' },
+      formatter: (params) => {
+        const date = new Date(params[0].value[0]).toISOString().slice(0, 10)
+        const lines = params.map((p) => `${p.seriesName}: ${p.value[1]?.toFixed(2) ?? '—'}`)
+        return `${date}<br/>${lines.join('<br/>')}`
       },
     },
     legend: {
-      data: legends,
-      top: 30,
+      data: ['指数', '资金曲线'],
+      top: 10,
     },
-    grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '15%',
-      top: '15%',
-    },
+    grid: { left: 60, right: 60, top: 60, bottom: 60 },
     xAxis: {
-      type: 'category',
-      data: dates,
-      scale: true,
-      boundaryGap: false,
-      axisLine: { onZero: false },
-      splitLine: { show: false },
+      type: 'time',
+      min: minDate,
+      max: maxDate,
+      axisLabel: {
+        formatter: (value) => new Date(value).toISOString().slice(0, 10),
+      },
     },
     yAxis: [
       {
         type: 'value',
+        name: '指数',
+        position: 'left',
         scale: true,
-        splitArea: { show: true },
+        axisLabel: { color: '#1f78b4' },
       },
       {
         type: 'value',
+        name: '资金',
+        position: 'right',
         scale: true,
-        gridIndex: 0,
+        axisLabel: { color: '#33a02c' },
       },
     ],
-    dataZoom: [
+    series: [
       {
-        type: 'inside',
-        start: 50,
-        end: 100,
+        name: '指数',
+        type: 'line',
+        data: indexData,
+        showSymbol: false,
+        smooth: true,
+        lineStyle: { width: 1.5, color: '#1f78b4' },
+        connectNulls: true,
       },
       {
-        show: true,
-        type: 'slider',
-        top: '90%',
-        start: 50,
-        end: 100,
+        name: '资金曲线',
+        type: 'line',
+        data: equityData,
+        yAxisIndex: 1,
+        showSymbol: false,
+        smooth: true,
+        lineStyle: { width: 1.5, color: '#33a02c' },
+        connectNulls: true,
       },
     ],
-    series: series,
   }
 
-  console.log('设置图表配置，系列数量:', series.length)
-  chartInstance.setOption(option)
+  chart.value.setOption(option)
+  window.addEventListener('resize', () => chart.value?.resize())
 }
 
-// 监听数据变化
-watch(
-  () => props.data,
-  (newData) => {
-    console.log('图表数据发生变化，hasData:', hasData.value)
-    nextTick(() => {
-      if (chartInitialized.value) {
-        updateChart()
-      } else {
-        initChart()
-      }
-    })
-  },
-  { deep: true, immediate: true },
-)
-
-// 监听加载状态变化
-watch(
-  () => props.loading,
-  (newLoading, oldLoading) => {
-    if (oldLoading && !newLoading && hasData.value) {
-      // 从加载中变为加载完成，且有数据时更新图表
-      console.log('加载状态变化，更新图表')
-      nextTick(() => {
-        updateChart()
-      })
-    }
-  },
-)
-
-// 组件挂载
+// === 数据监听 ===
 onMounted(() => {
-  console.log('MarketChart 组件挂载')
-  // 延迟初始化，确保DOM已渲染
-  setTimeout(() => {
-    initChart()
-    // 如果已经有数据，立即渲染
-    if (hasData.value) {
-      updateChart()
-    }
-  }, 100)
+  if (marketStore.indexData && marketStore.equityData) {
+    renderChart(marketStore.indexData, marketStore.equityData)
+  }
 })
 
-// 组件卸载
-onUnmounted(() => {
-  if (chartInstance) {
-    chartInstance.dispose()
-    chartInstance = null
-  }
-  chartInitialized.value = false
-})
+watch(
+  () => [marketStore.indexData, marketStore.equityData],
+  ([indexData, equityData]) => {
+    if (indexData?.length && equityData?.length) {
+      renderChart(indexData, equityData)
+    }
+  },
+  { deep: true },
+)
 </script>
 
 <style scoped>
-.market-chart {
-  width: 100%;
-  height: 600px;
-  position: relative;
-}
-
 .chart-container {
   width: 100%;
   height: 100%;
-}
-
-.chart-loading {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100%;
-  color: #666;
-  font-size: 16px;
-}
-
-.chart-empty {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100%;
-  color: #999;
-  font-size: 16px;
-  background: #f9f9f9;
-  border: 2px dashed #ddd;
-  border-radius: 8px;
+  min-height: 480px;
 }
 </style>
