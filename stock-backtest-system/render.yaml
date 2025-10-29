@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: stock-backtest-backend
+    env: docker
+    plan: free
+    region: oregon
+    dockerfilePath: backend/Dockerfile
+    dockerContext:   backend
+    # 如果暂时没有 /actuator/health，就先别加健康检查
+    autoDeploy: true
+    envVars:
+      - key: JAVA_TOOL_OPTIONS
+        value: -XX:MaxRAMPercentage=70.0
